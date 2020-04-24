@@ -35,10 +35,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Scanner;
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -49,14 +46,6 @@ public class RoboJudge {
 
     private static final int STREAMING_LIMIT = 290000; // ~5 minutes
 
-    private static String[] keywords = {
-            "Benitez",
-            "fourth year",
-            "fifth year",
-            "notorious",
-            "letterhead"
-    };
-
     private static final String TRANSCRIPT_MAP_FILE = ".transcript_map";
     private static final String KEYWORD_MAP_FILE = ".keywords_map";
 
@@ -64,6 +53,9 @@ public class RoboJudge {
     private static List<ByteString> questions = null;
     private static HashMap<Integer, String> transcriptMap = new HashMap<>();
     private static HashMap<String, ArrayList<Integer>> keywordMap = new HashMap<>();
+    private static Random random = new Random();
+    private static HashSet<Integer> asked = new HashSet<Integer>();
+    private static Clip clip;
 
     public static final String RED = "\033[0;31m";
     public static final String GREEN = "\033[0;32m";
@@ -141,7 +133,6 @@ public class RoboJudge {
             for (ByteString q : questions) {
                 // if we've seen this one, skip it
                 if (transcriptMap.containsKey(q.hashCode())) {
-                    System.out.println("Seen: " + transcriptMap.get(q.hashCode()));
                     continue;
                 }
 
@@ -212,6 +203,7 @@ public class RoboJudge {
         for (ByteString q : questions) {
             // print transcript for q
             int qHash = q.hashCode();
+            boolean endKeywords = false;
             String tr = transcriptMap.get(qHash);
             System.out.println("Question: " + tr);
 
@@ -221,14 +213,21 @@ public class RoboJudge {
             //TODO: what if we want to delete one?
 
             // get new keywords for q
-            System.out.println("Enter new keywords or phrases, one per line, with an empty line to continue:");
+            System.out.println("Enter new keywords or phrases, one per line; empty line to continue, # to end:");
             Scanner in = new Scanner(System.in);
             String k = in.nextLine().toLowerCase().trim();
             while (!k.equals("")) {
+                if (k.equals("#")) {
+                    endKeywords = true;
+                    break;
+                }
                 ArrayList<Integer> l = keywordMap.computeIfAbsent(k, k1 -> new ArrayList<>());
                 if(!l.contains(qHash)) l.add(qHash);
                 k = in.nextLine().toLowerCase().trim();
             }
+
+            // if user entered '#', bail
+            if (endKeywords) break;
         }
 
         // save the keywordMap
@@ -244,8 +243,24 @@ public class RoboJudge {
         }
     }
 
+    private static void ask(int qHash) {
+        System.out.println("Question: " + transcriptMap.get(qHash));
+        ByteString q = getQuestion(qHash);
+
+        try {
+            AudioInputStream questionStream = AudioSystem.getAudioInputStream(new ByteArrayInputStream(q.toByteArray()));
+            if (clip.isOpen()) clip.close();
+            clip.open(questionStream);
+            clip.start();
+        } catch (Exception e) {
+            System.out.println("Unable to play question.");
+            System.out.println(e);
+        }
+    }
+
     public static void main(String... args) {
         RoboJudgeCLIOptions options = RoboJudgeCLIOptions.fromFlags(args);
+
         if (options == null) {
             // Could not parse.
             System.out.println("Failed to parse options.");
@@ -256,14 +271,19 @@ public class RoboJudge {
         transcribeQuestions(options);
         getKeywordsForQuestions();
 
+        try {
+            clip = AudioSystem.getClip();
+        } catch (Exception e) {
+            System.out.println("Audio error:");
+            System.out.println(e);
+        }
+
         // main loop
-        /*
         try {
             infiniteStreamingRecognize(options.langCode);
         } catch (Exception e) {
             System.out.println("Exception caught: " + e);
         }
-        */
     }
 
     public static String convertMillisToDate(double milliSeconds) {
@@ -280,7 +300,6 @@ public class RoboJudge {
 
     /** Performs infinite streaming speech recognition */
     public static void infiniteStreamingRecognize(String languageCode) throws Exception {
-
         // Microphone Input buffering
         class MicBuffer implements Runnable {
 
@@ -359,15 +378,40 @@ public class RoboJudge {
                             // recognize keywords
                             String tr = alternative.getTranscript();
                             tr = tr.toLowerCase();
+                            Set<String> keywords = keywordMap.keySet();
 
                             for (String k : keywords) {
                                 k = k.toLowerCase();
 
                                 // if (we recognize a keyword) AND ((we haven't seen it before) OR (we've seen it before but in another location))
                                 if (tr.contains(k) && (!seen.containsKey(k) || seen.get(k) != tr.lastIndexOf(k))) {
-                                    seen.put(k, tr.lastIndexOf(k));
+                                    seen.put(k, tr.lastIndexOf(k)); // we've now seen this keyword at this index
                                     System.out.print("\n" + BLUE);
                                     System.out.println("*** Recognized " + k + " ***");
+                                    if (clip.isRunning()) break;                                                // if we're already asking a question, bail
+                                    int chance = random.nextInt(100);
+                                    if (chance < 25) {                                                         // if the RNG says to ask a question ...
+                                        //System.out.println("Gonna ask a q");
+                                        ArrayList<Integer> questionsList = keywordMap.get(k);                   // get the list of questions for this keyword
+                                        if (questionsList.size() == 0) break;                                   // if there aren't any, bail
+                                        int q = questionsList.get(random.nextInt(questionsList.size()));        // get a random question from the list
+                                        while (asked.contains(q)) {                                             // if we've asked it ...
+                                            //System.out.println("Already asked q: " + transcriptMap.get(q));
+                                            questionsList.remove(new Integer(q));                               // remove it from this keyword's list
+
+                                            if (questionsList.size() == 0)                                      // if that was the last question, bail
+                                                break;
+                                            else {
+                                                //System.out.println("No more questions for this keyword");
+                                                q = questionsList.get(random.nextInt(questionsList.size()));    // otherwise, get another question and roll around
+                                            }
+                                        }
+
+                                        if (!asked.contains(q)) {                                               // if we haven't asked the question, ask it now
+                                            ask(q);
+                                            asked.add(q);                                                       // and now we've asked it
+                                        }
+                                    }
                                 }
                             }
 
