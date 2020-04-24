@@ -95,15 +95,8 @@ public class RoboJudge {
         }
     }
 
-    public static void main(String... args) {
-        RoboJudgeCLIOptions options = RoboJudgeCLIOptions.fromFlags(args);
-        if (options == null) {
-            // Could not parse.
-            System.out.println("Failed to parse options.");
-            System.exit(1);
-        }
-
-        // parse hints file
+    // load hints from file if we have them
+    public static void parseHints(RoboJudgeCLIOptions options) {
         if (options.hintsFile != null) {
             try {
                 Path path = Paths.get(options.hintsFile);
@@ -113,15 +106,18 @@ public class RoboJudge {
                 hints = null;
             }
         }
+    }
 
-        // put together transcriptMap <wav bytes,transcription>
+    // put together transcriptMap <wav file bytes,transcription>
+    // load transcripts from file if we have them
+    public static void transcribeQuestions(RoboJudgeCLIOptions options) {
         try (Stream<Path> questionWavs = Files.list(Paths.get(options.wavDirectory))) {
             // read question files
             List<ByteString> questions = questionWavs.filter(Files::isRegularFile)
-                                                 .filter(q -> q.toString().toLowerCase().endsWith("wav"))
-                                                 .map(RoboJudge::readFileBytes)
-                                                 .map(ByteString::copyFrom)
-                                                 .collect(Collectors.toList());
+                    .filter(q -> q.toString().toLowerCase().endsWith("wav"))
+                    .map(RoboJudge::readFileBytes)
+                    .map(ByteString::copyFrom)
+                    .collect(Collectors.toList());
 
             // load transcriptMap if it exists
             try {
@@ -184,6 +180,18 @@ public class RoboJudge {
             System.out.println("Exception caught: " + e);
             System.exit(-1);
         }
+    }
+
+    public static void main(String... args) {
+        RoboJudgeCLIOptions options = RoboJudgeCLIOptions.fromFlags(args);
+        if (options == null) {
+            // Could not parse.
+            System.out.println("Failed to parse options.");
+            System.exit(1);
+        }
+
+        parseHints(options);
+        transcribeQuestions(options);
 
         // main loop
         /*
