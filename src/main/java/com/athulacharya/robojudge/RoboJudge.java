@@ -28,11 +28,9 @@ import com.google.cloud.speech.v1p1beta1.*;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Duration;
 
-import javax.sound.sampled.AudioFormat;
-import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.DataLine;
+import javax.sound.sampled.*;
 import javax.sound.sampled.DataLine.Info;
-import javax.sound.sampled.TargetDataLine;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -43,6 +41,8 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class RoboJudge {
 
@@ -56,7 +56,13 @@ public class RoboJudge {
             "letterhead"
     };
 
+    private static final String TRANSCRIPT_MAP_FILE = ".transcript_map";
+    private static final String KEYWORD_MAP_FILE = ".keywords_map";
+
     private static List<String> hints = null;
+    private static HashMap<ByteString, String> transcriptMap = new HashMap<>();
+    private static HashMap<String, ArrayList<ByteString>> keywordMap = new HashMap<>();
+
 
     public static final String RED = "\033[0;31m";
     public static final String GREEN = "\033[0;32m";
@@ -80,6 +86,15 @@ public class RoboJudge {
     private static StreamController referenceToStreamController;
     private static ByteString tempByteString;
 
+    // helper method to read file bytes inside Stream.map
+    public static byte[] readFileBytes(Path path) {
+        try {
+            return Files.readAllBytes(path);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public static void main(String... args) {
         RoboJudgeCLIOptions options = RoboJudgeCLIOptions.fromFlags(args);
         if (options == null) {
@@ -88,6 +103,7 @@ public class RoboJudge {
             System.exit(1);
         }
 
+        // parse hints file
         if (options.hintsFile != null) {
             try {
                 Path path = Paths.get(options.hintsFile);
@@ -96,14 +112,87 @@ public class RoboJudge {
                 System.out.println("Exception caught: " + e);
                 hints = null;
             }
-
         }
 
+        // put together transcriptMap <wav bytes,transcription>
+        try (Stream<Path> questionWavs = Files.list(Paths.get(options.wavDirectory))) {
+            // read question files
+            List<ByteString> questions = questionWavs.filter(Files::isRegularFile)
+                                                 .filter(q -> q.toString().toLowerCase().endsWith("wav"))
+                                                 .map(RoboJudge::readFileBytes)
+                                                 .map(ByteString::copyFrom)
+                                                 .collect(Collectors.toList());
+
+            // load transcriptMap if it exists
+            try {
+                FileInputStream tmFile = new FileInputStream(TRANSCRIPT_MAP_FILE);
+                ObjectInputStream tmIn = new ObjectInputStream(tmFile);
+                transcriptMap = (HashMap<ByteString,String>) tmIn.readObject();
+                tmIn.close();
+                tmFile.close();
+            } catch (FileNotFoundException f) { }
+
+            // transcribe any question files we haven't seen before
+            for (ByteString q : questions) {
+                // if we've seen this one, skip it
+                if (transcriptMap.containsKey(q)) {
+                    System.out.println("Seen: " + transcriptMap.get(q));
+                    continue;
+                }
+
+                // if not, transcribe
+                AudioInputStream questionStream = AudioSystem.getAudioInputStream(new ByteArrayInputStream(q.toByteArray()));
+                int sampleRate = (int) questionStream.getFormat().getSampleRate();
+
+                try(SpeechClient client = SpeechClient.create()) {
+                    // build context with hints file
+                    SpeechContext speechContext = SpeechContext.getDefaultInstance();
+                    if (hints != null) {
+                        speechContext = SpeechContext.newBuilder().addAllPhrases(hints).build();
+                    }
+
+                    // send request, get response
+                    RecognitionConfig config = RecognitionConfig.newBuilder()
+                            .setLanguageCode(options.langCode)
+                            .setSampleRateHertz(sampleRate)
+                            .addSpeechContexts(speechContext)
+                            .build();
+                    RecognitionAudio audio = RecognitionAudio.newBuilder().setContent(q).build();
+                    RecognizeRequest request = RecognizeRequest.newBuilder().setConfig(config).setAudio(audio).build();
+                    RecognizeResponse response = client.recognize(request);
+
+                    // concatenate all the lines of the response
+                    String tr = "";
+                    for (SpeechRecognitionResult result : response.getResultsList()) {
+                        tr += result.getAlternatives(0).getTranscript() + " ";
+                    }
+                    tr = tr.trim();
+
+                    // store it in the map
+                    System.out.println("Heard: " + tr);
+                    transcriptMap.put(q, tr);
+                }
+            }
+
+            // save the transcriptMap
+            FileOutputStream tmFile = new FileOutputStream(TRANSCRIPT_MAP_FILE);
+            ObjectOutputStream tmOut = new ObjectOutputStream(tmFile);
+            tmOut.writeObject(transcriptMap);
+            tmOut.close();
+            tmFile.close();
+        } catch (Exception e) {
+            System.out.println("Exception caught: " + e);
+            System.exit(-1);
+        }
+
+        // main loop
+        /*
         try {
             infiniteStreamingRecognize(options.langCode);
         } catch (Exception e) {
             System.out.println("Exception caught: " + e);
         }
+        */
     }
 
     public static String convertMillisToDate(double milliSeconds) {
@@ -215,23 +304,6 @@ public class RoboJudge {
                                 seen = new HashMap<>();
                                 System.out.println();
                             }
-
-                            /*
-                            if (tr.contains("debug")) {
-                                for (StreamingRecognitionResult r : results) {
-                                    if (r.getIsFinal())
-                                        System.out.println(r.getAlternativesList().get(0).getTranscript());
-                                }
-                            }
-
-                            if (result.getIsFinal()) {
-                                isFinalEndTime = resultEndTimeInMS;
-                                lastTranscriptWasFinal = true;
-                                seen = new HashMap<>();
-                            } else {
-                                lastTranscriptWasFinal = false;
-                            }
-                            */
                         }
 
                         public void onComplete() {}
