@@ -60,9 +60,9 @@ public class RoboJudge {
     private static final String KEYWORD_MAP_FILE = ".keywords_map";
 
     private static List<String> hints = null;
-    private static HashMap<ByteString, String> transcriptMap = new HashMap<>();
-    private static HashMap<String, ArrayList<ByteString>> keywordMap = new HashMap<>();
-
+    private static List<ByteString> questions = null;
+    private static HashMap<Integer, String> transcriptMap = new HashMap<>();
+    private static HashMap<String, ArrayList<Integer>> keywordMap = new HashMap<>();
 
     public static final String RED = "\033[0;31m";
     public static final String GREEN = "\033[0;32m";
@@ -87,7 +87,7 @@ public class RoboJudge {
     private static ByteString tempByteString;
 
     // helper method to read file bytes inside Stream.map
-    public static byte[] readFileBytes(Path path) {
+    private static byte[] readFileBytes(Path path) {
         try {
             return Files.readAllBytes(path);
         } catch (IOException e) {
@@ -95,8 +95,16 @@ public class RoboJudge {
         }
     }
 
+    private static ByteString getQuestion(int hashCode) {
+        for (ByteString q : questions) {
+            if (q.hashCode() == hashCode) return q;
+        }
+
+        return null;
+    }
+
     // load hints from file if we have them
-    public static void parseHints(RoboJudgeCLIOptions options) {
+    private static void parseHints(RoboJudgeCLIOptions options) {
         if (options.hintsFile != null) {
             try {
                 Path path = Paths.get(options.hintsFile);
@@ -110,10 +118,10 @@ public class RoboJudge {
 
     // put together transcriptMap <wav file bytes,transcription>
     // load transcripts from file if we have them
-    public static void transcribeQuestions(RoboJudgeCLIOptions options) {
+    private static void transcribeQuestions(RoboJudgeCLIOptions options) {
         try (Stream<Path> questionWavs = Files.list(Paths.get(options.wavDirectory))) {
             // read question files
-            List<ByteString> questions = questionWavs.filter(Files::isRegularFile)
+            questions = questionWavs.filter(Files::isRegularFile)
                     .filter(q -> q.toString().toLowerCase().endsWith("wav"))
                     .map(RoboJudge::readFileBytes)
                     .map(ByteString::copyFrom)
@@ -123,7 +131,7 @@ public class RoboJudge {
             try {
                 FileInputStream tmFile = new FileInputStream(TRANSCRIPT_MAP_FILE);
                 ObjectInputStream tmIn = new ObjectInputStream(tmFile);
-                transcriptMap = (HashMap<ByteString,String>) tmIn.readObject();
+                transcriptMap = (HashMap<Integer,String>) tmIn.readObject();
                 tmIn.close();
                 tmFile.close();
             } catch (FileNotFoundException f) { }
@@ -131,8 +139,8 @@ public class RoboJudge {
             // transcribe any question files we haven't seen before
             for (ByteString q : questions) {
                 // if we've seen this one, skip it
-                if (transcriptMap.containsKey(q)) {
-                    System.out.println("Seen: " + transcriptMap.get(q));
+                if (transcriptMap.containsKey(q.hashCode())) {
+                    System.out.println("Seen: " + transcriptMap.get(q.hashCode()));
                     continue;
                 }
 
@@ -166,7 +174,7 @@ public class RoboJudge {
 
                     // store it in the map
                     System.out.println("Heard: " + tr);
-                    transcriptMap.put(q, tr);
+                    transcriptMap.put(q.hashCode(), tr);
                 }
             }
 
