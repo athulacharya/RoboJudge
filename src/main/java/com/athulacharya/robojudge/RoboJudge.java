@@ -38,6 +38,7 @@ import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Scanner;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -184,9 +185,62 @@ public class RoboJudge {
             tmOut.writeObject(transcriptMap);
             tmOut.close();
             tmFile.close();
+
+            //TODO: what about questions we delete?
         } catch (Exception e) {
             System.out.println("Exception caught: " + e);
             System.exit(-1);
+        }
+    }
+
+    private static void getKeywordsForQuestions() {
+        // load keywordMap if it exists
+        try {
+            FileInputStream kwFile = new FileInputStream(KEYWORD_MAP_FILE);
+            ObjectInputStream kwIn = new ObjectInputStream(kwFile);
+            keywordMap = (HashMap<String,ArrayList<Integer>>) kwIn.readObject();
+            kwIn.close();
+            kwFile.close();
+        } catch (FileNotFoundException f) {
+
+        } catch (Exception e) {
+            System.out.println("Error reading keyword map file.");
+            System.out.println(e);
+        }
+
+        // add to keywordMap
+        for (ByteString q : questions) {
+            // print transcript for q
+            int qHash = q.hashCode();
+            String tr = transcriptMap.get(qHash);
+            System.out.println("Question: " + tr);
+
+            // print existing keywords for q
+            System.out.println("Keywords: ");
+            keywordMap.forEach((keyword,questions) -> { if (questions.contains(qHash)) System.out.println("\t" + keyword); });
+            //TODO: what if we want to delete one?
+
+            // get new keywords for q
+            System.out.println("Enter new keywords or phrases, one per line, with an empty line to continue:");
+            Scanner in = new Scanner(System.in);
+            String k = in.nextLine().toLowerCase().trim();
+            while (!k.equals("")) {
+                ArrayList<Integer> l = keywordMap.computeIfAbsent(k, k1 -> new ArrayList<>());
+                if(!l.contains(qHash)) l.add(qHash);
+                k = in.nextLine().toLowerCase().trim();
+            }
+        }
+
+        // save the keywordMap
+        try {
+            FileOutputStream kwFile = new FileOutputStream(KEYWORD_MAP_FILE);
+            ObjectOutputStream kwOut = new ObjectOutputStream(kwFile);
+            kwOut.writeObject(keywordMap);
+            kwOut.close();
+            kwFile.close();
+        } catch (Exception e) {
+            System.out.println("Error writing keyword map file.");
+            System.out.println(e);
         }
     }
 
@@ -200,6 +254,7 @@ public class RoboJudge {
 
         parseHints(options);
         transcribeQuestions(options);
+        getKeywordsForQuestions();
 
         // main loop
         /*
