@@ -117,6 +117,14 @@ public class RoboJudge {
         }
     }
 
+    private static void saveTranscriptMap() throws FileNotFoundException, IOException {
+        FileOutputStream tmFile = new FileOutputStream(TRANSCRIPT_MAP_FILE);
+        ObjectOutputStream tmOut = new ObjectOutputStream(tmFile);
+        tmOut.writeObject(transcriptMap);
+        tmOut.close();
+        tmFile.close();
+    }
+
     // put together transcriptMap <wav file bytes,transcription>
     // load transcripts from file if we have them
     private static void transcribeQuestions(RoboJudgeCLIOptions options) {
@@ -172,20 +180,13 @@ public class RoboJudge {
                     }
                     tr = tr.trim();
 
-                    // TODO: add option to type in correct transcript, either here or in keywords loop
                     // store it in the map
                     System.out.println("Heard: " + tr);
                     transcriptMap.put(q.hashCode(), tr);
                 }
             }
 
-            // save the transcriptMap
-            FileOutputStream tmFile = new FileOutputStream(TRANSCRIPT_MAP_FILE);
-            ObjectOutputStream tmOut = new ObjectOutputStream(tmFile);
-            tmOut.writeObject(transcriptMap);
-            tmOut.close();
-            tmFile.close();
-
+            saveTranscriptMap();
             //TODO: what about questions we delete?
         } catch (Exception e) {
             System.out.println("Exception caught: " + e);
@@ -194,6 +195,9 @@ public class RoboJudge {
     }
 
     private static void getKeywordsForQuestions() {
+        boolean transcriptMapDirty = false;
+        String controlsMessage = "Enter new keywords or phrases, one per line.\nControls: ? to retype question, empty line to go to next, # to end";
+
         // load keywordMap if it exists
         try {
             FileInputStream kwFile = new FileInputStream(KEYWORD_MAP_FILE);
@@ -221,19 +225,48 @@ public class RoboJudge {
             //TODO: what if we want to delete one?
 
             // get new keywords for q
-            System.out.println("Enter new keywords or phrases, one per line; empty line to continue, # to end:");
+            System.out.println(controlsMessage);
             Scanner in = new Scanner(System.in);
             String k;
 
             do {
                 k = in.nextLine().toLowerCase().trim();
+
                 if (k.equals("#")) {
                     break questionsLoop;
                 }
 
-                ArrayList<Integer> l = keywordMap.computeIfAbsent(k, k1 -> new ArrayList<>());
-                if(!l.contains(qHash)) l.add(qHash);
+                if (k.equals("?")) {
+                    try {
+                        playClip(q);
+                        System.out.print("Enter correct transcription: ");
+                        k = in.nextLine().toLowerCase().trim();
+                        transcriptMap.remove(qHash);
+                        transcriptMap.put(qHash, k);
+                        transcriptMapDirty = true;
+                    } catch (Exception e) {
+                        System.out.println("Error: Unable to play clip audio.");
+                        e.printStackTrace();
+                    }
+
+                    System.out.println(controlsMessage);
+                    continue;
+                }
+
+                if(!k.equals("")) {
+                    ArrayList<Integer> l = keywordMap.computeIfAbsent(k, k1 -> new ArrayList<>());
+                    if(!l.contains(qHash)) l.add(qHash);
+                }
             } while (!k.equals(""));
+        }
+
+        if (transcriptMapDirty) {
+            try {
+                saveTranscriptMap();
+            } catch (Exception e) {
+                System.out.println("Error saving transcriptMap:");
+                e.printStackTrace();
+            }
         }
 
         // save the keywordMap
@@ -249,16 +282,21 @@ public class RoboJudge {
         }
     }
 
+    private static void playClip(ByteString q)
+            throws LineUnavailableException, IOException, UnsupportedAudioFileException {
+        AudioInputStream questionStream = AudioSystem.getAudioInputStream(new ByteArrayInputStream(q.toByteArray()));
+        if (clip.isOpen()) clip.close();
+        clip.open(questionStream);
+        clip.start();
+    }
+
     private static void ask(int qHash) {
         System.out.println("Question: " + transcriptMap.get(qHash));
         ByteString q = getQuestion(qHash);
 
         try {
             // play the clip
-            AudioInputStream questionStream = AudioSystem.getAudioInputStream(new ByteArrayInputStream(q.toByteArray()));
-            if (clip.isOpen()) clip.close();
-            clip.open(questionStream);
-            clip.start();
+            playClip(q);
 
             // set the backoff timer
             backoff = true;
@@ -286,16 +324,16 @@ public class RoboJudge {
             System.exit(1);
         }
 
-        parseHints(options);
-        transcribeQuestions(options);
-        getKeywordsForQuestions();
-
         try {
             clip = AudioSystem.getClip();
         } catch (Exception e) {
             System.out.println("Audio error:");
             System.out.println(e);
         }
+
+        parseHints(options);
+        transcribeQuestions(options);
+        getKeywordsForQuestions();
 
         // main loop
         try {
