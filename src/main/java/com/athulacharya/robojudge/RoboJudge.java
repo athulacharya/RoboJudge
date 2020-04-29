@@ -209,10 +209,9 @@ public class RoboJudge {
         }
 
         // add to keywordMap
-        for (ByteString q : questions) {
+        questionsLoop: for (ByteString q : questions) {
             // print transcript for q
             int qHash = q.hashCode();
-            boolean endKeywords = false;
             String tr = transcriptMap.get(qHash);
             System.out.println("Question: " + tr);
 
@@ -224,19 +223,17 @@ public class RoboJudge {
             // get new keywords for q
             System.out.println("Enter new keywords or phrases, one per line; empty line to continue, # to end:");
             Scanner in = new Scanner(System.in);
-            String k = in.nextLine().toLowerCase().trim();
-            while (!k.equals("")) {
+            String k;
+
+            do {
+                k = in.nextLine().toLowerCase().trim();
                 if (k.equals("#")) {
-                    endKeywords = true;
-                    break;
+                    break questionsLoop;
                 }
+
                 ArrayList<Integer> l = keywordMap.computeIfAbsent(k, k1 -> new ArrayList<>());
                 if(!l.contains(qHash)) l.add(qHash);
-                k = in.nextLine().toLowerCase().trim();
-            }
-
-            // if user entered '#', bail
-            if (endKeywords) break;
+            } while (!k.equals(""));
         }
 
         // save the keywordMap
