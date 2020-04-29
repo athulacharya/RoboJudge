@@ -204,6 +204,7 @@ public class RoboJudge {
         String controlsMessage = "Controls:\n" +
                                  "? - show controls\n" +
                                  "! - show keywords\n" +
+                                 "% - delete keywords\n" +
                                  "@ - correct question transcript\n" +
                                  "# - end\n" +
                                  "empty line - next question\n";
@@ -272,6 +273,10 @@ public class RoboJudge {
                         System.out.println(controlsMessage);
                         break;
 
+                    case "%":
+                        keywordMap.forEach((keyword,questions) -> questions.remove(new Integer(qHash)));
+                        break;
+
                     case "":
                         continue;
 
@@ -312,6 +317,16 @@ public class RoboJudge {
         clip.start();
     }
 
+    private static void endBackoff(long secs) {
+        TimerTask backoffTask = new TimerTask() {
+            public void run() {
+                backoff = false;
+            }
+        };
+        Timer backoffTimer = new Timer();
+        backoffTimer.schedule(backoffTask, secs);
+    }
+
     private static void ask(int qHash) {
         System.out.println("Question: " + transcriptMap.get(qHash));
         ByteString q = getQuestion(qHash);
@@ -324,13 +339,7 @@ public class RoboJudge {
             backoff = true;
             long delay = clip.getMicrosecondLength()/1000;      // delay for at least the length of the clip
             delay += random.nextInt(BACKOFF_BOUND)*1000;        // plus up to BACKOFF_BOUND seconds
-            TimerTask backoffTask = new TimerTask() {
-                public void run() {
-                    backoff = false;
-                }
-            };
-            Timer backoffTimer = new Timer();
-            backoffTimer.schedule(backoffTask, delay);
+            endBackoff(delay);
         } catch (Exception e) {
             System.out.println("Unable to play question.");
             System.out.println(e);
@@ -358,6 +367,10 @@ public class RoboJudge {
         transcribeQuestions(options);
         System.out.println("\n*** INPUT KEYWORDS FOR QUESTIONS ***");
         getKeywordsForQuestions();
+
+        // give ya 45 seconds to get your opener out
+        backoff = true;
+        endBackoff(45);
 
         // main loop
         try {
