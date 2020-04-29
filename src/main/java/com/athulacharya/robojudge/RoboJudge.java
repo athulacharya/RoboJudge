@@ -194,9 +194,20 @@ public class RoboJudge {
         }
     }
 
+    private static void printKeywords(int qHash) {
+        System.out.println("Keywords: ");
+        keywordMap.forEach((keyword,questions) -> { if (questions.contains(qHash)) System.out.println("\t" + keyword); });
+    }
+
     private static void getKeywordsForQuestions() {
         boolean transcriptMapDirty = false;
-        String controlsMessage = "Enter new keywords or phrases, one per line.\nControls: ? to retype question, empty line to go to next, # to end";
+        String controlsMessage = "Controls:\n" +
+                                 "? - show controls\n" +
+                                 "! - show keywords\n" +
+                                 "@ - correct question transcript\n" +
+                                 "# - end\n" +
+                                 "empty line - next question\n";
+        String keywordsMessage = "Enter new keywords or phrases, one per line [? to see controls].";
 
         // load keywordMap if it exists
         try {
@@ -212,6 +223,8 @@ public class RoboJudge {
             System.out.println(e);
         }
 
+        System.out.println(controlsMessage);
+
         // add to keywordMap
         questionsLoop: for (ByteString q : questions) {
             // print transcript for q
@@ -220,42 +233,51 @@ public class RoboJudge {
             System.out.println("Question: " + tr);
 
             // print existing keywords for q
-            System.out.println("Keywords: ");
-            keywordMap.forEach((keyword,questions) -> { if (questions.contains(qHash)) System.out.println("\t" + keyword); });
+            printKeywords(qHash);
             //TODO: what if we want to delete one?
 
             // get new keywords for q
-            System.out.println(controlsMessage);
+            System.out.println(keywordsMessage);
             Scanner in = new Scanner(System.in);
             String k;
 
             do {
                 k = in.nextLine().toLowerCase().trim();
 
-                if (k.equals("#")) {
-                    break questionsLoop;
-                }
+                switch(k) {
+                    case "#": // end
+                        break questionsLoop;
 
-                if (k.equals("?")) {
-                    try {
-                        playClip(q);
-                        System.out.print("Enter correct transcription: ");
-                        k = in.nextLine().toLowerCase().trim();
-                        transcriptMap.remove(qHash);
-                        transcriptMap.put(qHash, k);
-                        transcriptMapDirty = true;
-                    } catch (Exception e) {
-                        System.out.println("Error: Unable to play clip audio.");
-                        e.printStackTrace();
-                    }
+                    case "@": // correct transcript
+                        try {
+                            playClip(q);
+                            System.out.print("Enter correct transcription: ");
+                            k = in.nextLine().toLowerCase().trim();
+                            transcriptMap.remove(qHash);
+                            transcriptMap.put(qHash, k);
+                            transcriptMapDirty = true;
+                        } catch (Exception e) {
+                            System.out.println("Error: Unable to play clip audio.");
+                            e.printStackTrace();
+                        }
 
-                    System.out.println(controlsMessage);
-                    continue;
-                }
+                        System.out.println(keywordsMessage);
+                        continue;
 
-                if(!k.equals("")) {
-                    ArrayList<Integer> l = keywordMap.computeIfAbsent(k, k1 -> new ArrayList<>());
-                    if(!l.contains(qHash)) l.add(qHash);
+                    case "!":
+                        printKeywords(qHash);
+                        break;
+
+                    case "?":
+                        System.out.println(controlsMessage);
+                        break;
+
+                    case "":
+                        continue;
+
+                    default:
+                        ArrayList<Integer> l = keywordMap.computeIfAbsent(k, k1 -> new ArrayList<>());
+                        if(!l.contains(qHash)) l.add(qHash);
                 }
             } while (!k.equals(""));
         }
