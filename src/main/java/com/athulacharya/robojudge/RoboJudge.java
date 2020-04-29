@@ -45,7 +45,7 @@ import java.util.stream.Stream;
 public class RoboJudge {
     // backoff stuff
     private static boolean backoff = false;
-    private static final int BACKOFF_BOUND = 20; // maximum backoff after asking a question in seconds
+    private static final int BACKOFF_BOUND = 35; // maximum backoff after asking a question in seconds
 
     // questions and keywords
     // TODO: turn this all into a db
@@ -61,7 +61,7 @@ public class RoboJudge {
 
     // misc
     private static Clip clip;
-    private static final int BENCH_HEAT = 10; // % probability of asking a question on hearing a keyword
+    private static final int BENCH_HEAT = 7; // % probability of asking a question on hearing a keyword
 
     // colors
     public static final String RED = "\033[0;31m";
@@ -317,14 +317,14 @@ public class RoboJudge {
         clip.start();
     }
 
-    private static void endBackoff(long secs) {
+    private static void endBackoff(long millisecs) {
         TimerTask backoffTask = new TimerTask() {
             public void run() {
                 backoff = false;
             }
         };
         Timer backoffTimer = new Timer();
-        backoffTimer.schedule(backoffTask, secs);
+        backoffTimer.schedule(backoffTask, millisecs);
     }
 
     private static void ask(int qHash) {
@@ -370,7 +370,7 @@ public class RoboJudge {
 
         // give ya 45 seconds to get your opener out
         backoff = true;
-        endBackoff(45);
+        endBackoff(45*1000);
 
         // main loop
         try {
