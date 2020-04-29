@@ -43,26 +43,34 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class RoboJudge {
+    // backoff stuff
+    private static boolean backoff = false;
+    private static final int BACKOFF_BOUND = 20; // maximum backoff after asking a question in seconds
 
-    private static final int STREAMING_LIMIT = 290000; // ~5 minutes
-
+    // questions and keywords
+    // TODO: turn this all into a db
+    // TODO: add capability for follow-up questions
     private static final String TRANSCRIPT_MAP_FILE = ".transcript_map";
     private static final String KEYWORD_MAP_FILE = ".keywords_map";
-
     private static List<String> hints = null;
     private static List<ByteString> questions = null;
     private static HashMap<Integer, String> transcriptMap = new HashMap<>();
     private static HashMap<String, ArrayList<Integer>> keywordMap = new HashMap<>();
     private static Random random = new Random();
     private static HashSet<Integer> asked = new HashSet<Integer>();
-    private static Clip clip;
 
+    // misc
+    private static Clip clip;
+    private static final int BENCH_HEAT = 10; // % probability of asking a question on hearing a keyword
+
+    // colors
     public static final String RED = "\033[0;31m";
     public static final String GREEN = "\033[0;32m";
     public static final String YELLOW = "\033[0;33m";
     public static final String BLUE = "\033[0;34m";
 
-    // Creating shared object
+    // Google stuff
+    private static final int STREAMING_LIMIT = 290000; // ~5 minutes
     private static volatile BlockingQueue<byte[]> sharedQueue = new LinkedBlockingQueue<>();
     private static TargetDataLine targetDataLine;
     private static int BYTES_PER_BUFFER = 6400; // buffer size in bytes
@@ -164,6 +172,7 @@ public class RoboJudge {
                     }
                     tr = tr.trim();
 
+                    // TODO: add option to type in correct transcript, either here or in keywords loop
                     // store it in the map
                     System.out.println("Heard: " + tr);
                     transcriptMap.put(q.hashCode(), tr);
@@ -248,10 +257,23 @@ public class RoboJudge {
         ByteString q = getQuestion(qHash);
 
         try {
+            // play the clip
             AudioInputStream questionStream = AudioSystem.getAudioInputStream(new ByteArrayInputStream(q.toByteArray()));
             if (clip.isOpen()) clip.close();
             clip.open(questionStream);
             clip.start();
+
+            // set the backoff timer
+            backoff = true;
+            long delay = clip.getMicrosecondLength()/1000;      // delay for at least the length of the clip
+            delay += random.nextInt(BACKOFF_BOUND)*1000;        // plus up to BACKOFF_BOUND seconds
+            TimerTask backoffTask = new TimerTask() {
+                public void run() {
+                    backoff = false;
+                }
+            };
+            Timer backoffTimer = new Timer();
+            backoffTimer.schedule(backoffTask, delay);
         } catch (Exception e) {
             System.out.println("Unable to play question.");
             System.out.println(e);
@@ -388,9 +410,9 @@ public class RoboJudge {
                                     seen.put(k, tr.lastIndexOf(k)); // we've now seen this keyword at this index
                                     System.out.print("\n" + BLUE);
                                     System.out.println("*** Recognized " + k + " ***");
-                                    if (clip.isRunning()) break;                                                // if we're already asking a question, bail
+                                    if (backoff) break;                                                         // if we just asked a question, bail
                                     int chance = random.nextInt(100);
-                                    if (chance < 25) {                                                         // if the RNG says to ask a question ...
+                                    if (chance < BENCH_HEAT) {                                                  // if the RNG says to ask a question, then:
                                         //System.out.println("Gonna ask a q");
                                         ArrayList<Integer> questionsList = keywordMap.get(k);                   // get the list of questions for this keyword
                                         if (questionsList.size() == 0) break;                                   // if there aren't any, bail
