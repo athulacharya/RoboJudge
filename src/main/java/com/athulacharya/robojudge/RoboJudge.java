@@ -354,7 +354,9 @@ public class RoboJudge {
         }
 
         parseHints(options);
+        System.out.println("*** TRANSCRIBING NEW QUESTIONS ***");
         transcribeQuestions(options);
+        System.out.println("\n*** INPUT KEYWORDS FOR QUESTIONS ***");
         getKeywordsForQuestions();
 
         // main loop
